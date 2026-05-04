@@ -17,25 +17,25 @@ def resolve_inputs(raw):
             return default
         return val
     return {
-        # OPERATIVO
+        # FCCNOGC
         "ric_op_mon": req["ric_op_mon"],
         "cost_op_mon": req["cost_op_mon"],
         "ammort": req["ammort"],
-
-        # TAX / FINANZA
         "tax": opt["imp"],
-        "oneri_finanz": opt["of"],
 
-        # BALANCE SHEET
+        #FCFR
         "patrimonio_netto": req["pat_net"],
         "debiti_finanz": req["deb_f"],
-        "liquidity": req["liq"],
+        "quota_rimbors_capital": opt("rimb_cap", 0),
 
-        # CASH FLOW
+        #CCNO PER VARIAZIONE
         "ccno1": opt("ccno", 0),  # se non hai serie storica
         "ccno2": opt("ccno", 0),
 
-        # EXTRA
-        "dividendi": opt("div", 0),
-        "quota_rimbors_capital": opt("rimb_cap", 0),
-    }# da completare con gli altri parametri del dag
+        #FCRf
+        "dividendi": opt("div", 0)
+        "oneri_finanz": opt["of"],
+
+        #EXTRA
+        "liquidity": req["liq"],
+    }# da completare I cash flow con FCGC FCID, FCU, FCE, VARIAZIONE LIQUIDITà
