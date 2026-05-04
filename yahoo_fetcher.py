@@ -100,10 +100,96 @@ YAHOO_NEGATIVE_CONVENTIONS = [
     "inv",          # PurchaseOfPPE e PurchaseOfIntangibles sono negative
 ]
 
+def _get_latest(df, year=None):
+    if df is None or df.empty:
+        return None
 
-# ── FETCHER ──────────────────────────────────────────────────
+    df = df.copy()
+
+    if "asOfDate" in df.columns:
+        df = df.sort_values("asOfDate")
+
+    if year:
+        df = df[df["asOfDate"].dt.year == year]
+
+    return df.iloc[-1] if not df.empty else None
+
+
+
+# ── MAIN FETCHER ──────────────────────────────────────────────────
 
 def fetch_financials(ticker_symbol: str, year: int = None) -> dict:
+
+    stock = Ticker(ticker_symbol)
+
+    # ❗ FIX: rimosso trailing=False (causa errore nella tua versione)
+    df_is = stock.income_statement(frequency="a")
+    df_bs = stock.balance_sheet(frequency="a")
+    df_cf = stock.cash_flow(frequency="a")
+
+    statements = {
+        "income_statement": _get_latest(df_is, year),
+        "balance_sheet": _get_latest(df_bs, year),
+        "cash_flow": _get_latest(df_cf, year),
+    }
+
+    result = {}
+    missing = []
+
+    all_keys = set(YAHOO_DIRECT) | set(YAHOO_AGGREGATED)
+
+    for key in all_keys:
+
+        stmt = YAHOO_STATEMENT.get(key)
+        row = statements.get(stmt)
+
+        if row is None:
+            result[key] = None
+            missing.append(key)
+            continue
+
+        # ── DIRECT ──
+        if key in YAHOO_DIRECT:
+
+            col = YAHOO_DIRECT[key]
+
+            if col not in row.index or pd.isna(row[col]):
+                result[key] = None
+                missing.append(key)
+                continue
+
+            val = float(row[col])
+
+            if key in YAHOO_NEGATIVE:
+                val = abs(val)
+
+            result[key] = val
+
+        # ── AGGREGATED ──
+        else:
+            total = 0.0
+            ok = True
+
+            for col, sign in YAHOO_AGGREGATED[key]:
+                if col not in row.index or pd.isna(row[col]):
+                    ok = False
+                    break
+                total += sign * float(row[col])
+
+            result[key] = total if ok else None
+
+            if not ok:
+                missing.append(key)
+
+    # ── CIN derivato ──
+    if all(result.get(k) is not None for k in ["pat_net", "deb_f", "liq"]):
+        result["cin"] = result["pat_net"] + result["deb_f"] - result["liq"]
+
+    result["_missing"] = missing
+    result["_ticker"] = ticker_symbol
+    result["_year"] = year
+
+    return result
     """
     Scarica i dati finanziari da Yahoo Finance e li restituisce
     come dizionario {chiave_calcolatore: valore} pronto per
@@ -123,125 +209,3 @@ def fetch_financials(ticker_symbol: str, year: int = None) -> dict:
             "_errors":     []
         }
     """
-    stock = Ticker(ticker_symbol)
-
-    # Scarica i tre statement annuali
-    try:
-        df_is = stock.income_statement(frequency="a", trailing=False)
-        df_bs = stock.balance_sheet(frequency="a", trailing=False)
-        df_cf = stock.cash_flow(frequency="a", trailing=False)
-    except Exception as e:
-        return {"_errors": [f"Errore download Yahoo Finance: {e}"]}
-
-    statements = {
-        "income_statement": df_is,
-        "balance_sheet":    df_bs,
-        "cash_flow":        df_cf,
-    }
-
-    # Filtra per anno se specificato, altrimenti usa il più recente
-    def get_row(df: pd.DataFrame) -> pd.Series | None:
-        if df is None or df.empty:
-            return None
-        df = df[df["periodType"] == "12M"].copy()
-        if year:
-            df = df[df["asOfDate"].dt.year == year]
-        if df.empty:
-            return None
-        return df.sort_values("asOfDate").iloc[-1]
-
-    rows = {k: get_row(v) for k, v in statements.items()}
-
-    # ── Estrazione ───────────────────────────────────────────
-    result  = {}
-    missing = []
-    errors  = []
-
-    all_keys = set(YAHOO_DIRECT.keys()) | set(YAHOO_AGGREGATED.keys())
-
-    for key in all_keys:
-        statement = YAHOO_STATEMENT.get(key)
-        row = rows.get(statement)
-
-        if row is None:
-            missing.append(key)
-            result[key] = None
-            continue
-
-        # Chiave diretta
-        if key in YAHOO_DIRECT:
-            col = YAHOO_DIRECT[key]
-            # Fallback per ric_op_mon
-            if key == "ric_op_mon" and col not in row.index:
-                col = "OperatingRevenue"
-            if col in row.index and pd.notna(row[col]):
-                value = float(row[col])
-                if key in YAHOO_NEGATIVE_CONVENTIONS:
-                    value = abs(value)
-                result[key] = value
-            else:
-                missing.append(key)
-                result[key] = None
-
-        # Chiave aggregata
-        elif key in YAHOO_AGGREGATED:
-            total = 0.0
-            all_found = True
-            for col, sign in YAHOO_AGGREGATED[key]:
-                if col in row.index and pd.notna(row[col]):
-                    total += sign * float(row[col])
-                else:
-                    all_found = False
-                    break
-            if all_found:
-                if key in YAHOO_NEGATIVE_CONVENTIONS:
-                    total = abs(total)
-                result[key] = total
-            else:
-                missing.append(key)
-                result[key] = None
-
-    # CIN calcolato se i tre componenti sono presenti
-    if all(result.get(k) is not None for k in ["pat_net", "deb_f", "liq"]):
-        result["cin"] = result["pat_net"] + result["deb_f"] - result["liq"]
-
-    result["_missing"] = missing
-    result["_errors"]  = errors
-    result["_ticker"]  = ticker_symbol
-    result["_year"]    = year
-
-    return result
-
-
-def fetch_report(result: dict) -> None:
-    """Stampa un report leggibile del risultato."""
-    print(f"\n{'='*55}")
-    print(f"  {result.get('_ticker', '?')} — anno {result.get('_year', 'più recente')}")
-    print(f"{'='*55}")
-
-    keys = [k for k in result if not k.startswith("_")]
-    found   = [k for k in keys if result[k] is not None]
-    missing = result.get("_missing", [])
-
-    print(f"\n  Trovate:  {len(found)}/{len(keys)} chiavi")
-    print(f"  Mancanti: {len(missing)}")
-
-    print("\n── Valori ──")
-    for k in sorted(found):
-        print(f"  {k:25s}: {result[k]:>20,.0f}")
-
-    if missing:
-        print("\n── Non trovate ──")
-        for k in missing:
-            print(f"  {k}")
-
-    if result.get("_errors"):
-        print("\n── Errori ──")
-        for e in result["_errors"]:
-            print(f"  {e}")
-
-
-# ── Test ─────────────────────────────────────────────────────
-if __name__ == "__main__":
-    result = fetch_financials("RACE", year=2023)
-    fetch_report(result)
