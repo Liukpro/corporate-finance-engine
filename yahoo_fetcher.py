@@ -2,10 +2,6 @@
 # YAHOO FINANCE MAPPING → CHIAVI CALCOLATORE
 # Fonte: yahooquery, colonne verificate su RACE (Ferrari N.V.)
 # ============================================================
-# Struttura:
-#   "chiave_calcolatore": "NomeColonnaYahoo"
-# Per le chiavi aggregate: lista di (colonna, segno)
-# ============================================================
 
 from yahooquery import Ticker
 import pandas as pd
