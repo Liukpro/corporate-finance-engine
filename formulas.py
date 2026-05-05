@@ -264,6 +264,7 @@ def calc_paid_off_debt(mortgage, n, t):
 
 def calc_mortgage_payment(capital_share, interests_share):
   mortgage_payment = capital_share + interests_share
+  return mortgage_payment
 
 #Mortgage Francese: rata costante
 
